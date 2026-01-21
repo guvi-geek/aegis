@@ -14,11 +14,12 @@ type Config struct {
 	MongoDBName string
 
 	// Redis
-	RedisHost          string
-	RedisPassword      string
-	RedisStreamKey     string
-	RedisConsumerGroup string
-	RedisDeadLetterKey string
+	RedisHost               string
+	RedisPassword           string
+	RedisStreamKey          string
+	RedisConsumerGroup      string
+	RedisDeadLetterKey      string
+	StreamRetentionDuration time.Duration
 
 	// Astra Service
 	AstraBaseURL string
