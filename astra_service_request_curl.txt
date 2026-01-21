@@ -1,0 +1,24 @@
+Astra Service Request 
+
+curl -X POST "https://localhost:8080/api/v1/preprocess" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-here" \
+  -d '{
+    "emailId": "rishikesh@guvi.in",
+    "attemptId": "f1abbeaf-c4ca-4909-8711-f2514b0d4433",
+    "driveId": "34174",
+    "code": "#include <iostream>\n#include <bits/stdc++.h>\n#include <vector>\n#include <sstream>\nusing namespace std;\nint main(){int n=6;vector<int> prices(n);for(int i=0;i<n;i++){cin>>prices[i];}if(prices[5]!=4)prices[5]=0;int minPrice=INT_MAX;int best=0;for(int p:prices){minPrice=min(minPrice,p);best=max(best,p-minPrice);}cout<<best;return 0;}",
+    "language": "CPP"
+  }'
+
+
+curl -X POST "https://localhost:8080/api/v1/preprocess" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-here" \
+  -d '{
+    "emailId": "rishikesh@guvi.in",
+    "attemptId": "f1abbeaf-c4ca-4909-8711-f2514b0d4433",
+    "driveId": "34174",
+    "code": "#include <bits/stdc++.h>\nusing namespace std;\nint main(){int n=8;vector<int> t(n);vector<int> res(n,0);for(int i=0;i<n;i++){cin>>t[i];}stack<int> st;for(int i=0;i<n;i++){while(!st.empty() && t[i] > t[st.top()]){int idx=st.top();st.pop();res[idx]=i-idx;}st.push(i);}for(int i=0;i<res.size();i++){cout<<res[i];if(i<res.size()-1)cout<<\",\";}return 0;}",
+    "language": "CPP"
+  }'
