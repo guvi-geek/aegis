@@ -66,6 +66,8 @@ func Load() (*Config, error) {
 	cfg.RedisStreamKey = env.GetEnv("REDIS_STREAM_KEY", "plagiarism:stream")
 	cfg.RedisConsumerGroup = env.GetEnv("REDIS_CONSUMER_GROUP", "plagiarism:group")
 	cfg.RedisDeadLetterKey = env.GetEnv("REDIS_DEAD_LETTER_KEY", "plagiarism:dlq")
+	retentionHours := env.GetEnvInt("STREAM_RETENTION_DURATION", 24)
+	cfg.StreamRetentionDuration = time.Duration(retentionHours) * time.Hour
 
 	// Astra Service
 	cfg.AstraBaseURL = env.GetEnv("ASTRA_BASE_URL", "")
@@ -125,6 +127,9 @@ func (c *Config) Validate() error {
 	}
 	if c.BatchSize <= 0 {
 		return fmt.Errorf("BATCH_SIZE must be greater than 0")
+	}
+	if c.StreamRetentionDuration <= 0 {
+		return fmt.Errorf("STREAM_RETENTION_HOURS must be greater than 0")
 	}
 	return nil
 }
