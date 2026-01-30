@@ -1,6 +1,20 @@
 package models
 
-import "time"
+import (
+	"time"
+)
+
+type Step string
+
+const (
+	StepIdle          Step = "idle"
+	StepInitiated     Step = "initiated"
+	StepStarted       Step = "started"
+	StepPreprocessing Step = "preprocessing"
+	StepFiltering     Step = "filtering"
+	StepDeepAnalysis  Step = "deep_analysis"
+	StepCompleted     Step = "completed"
+)
 
 // Artifact represents a plagiarism artifact stored in MongoDB
 type Artifact struct {
@@ -26,8 +40,8 @@ type CandidateResult struct {
 	Email            string              `bson:"email" json:"email"`
 	AttemptID        string              `bson:"attemptID" json:"attemptID"`
 	DriveID          string              `bson:"driveId" json:"driveId"`
-	Risk             string              `bson:"risk" json:"risk"` // clean, suspicious, highly suspicious, Near copy
-	FlaggedQN        []string            `bson:"flagged_qn" json:"flagged_qn"`
+	Risk             string              `bson:"risk" json:"risk"` // safe, suspicious, highly_suspicious, near_copy
+	FlaggedQuestions []string            `bson:"flagged_qns" json:"flagged_qns"`
 	PlagiarismPeers  map[string][]string `bson:"plagiarism_peers" json:"plagiarism_peers"` // qId -> []attemptId
 	CodeSimilarity   int                 `bson:"code_similarity" json:"code_similarity"`
 	AlgoSimilarity   int                 `bson:"algo_similarity" json:"algo_similarity"`
@@ -37,11 +51,13 @@ type CandidateResult struct {
 
 // TestReport represents an overall test plagiarism report
 type TestReport struct {
-	DriveID   string    `bson:"driveId" json:"driveId"`
-	Risk      string    `bson:"risk" json:"risk"`     // Safe, Moderate, High, Critical
-	Status    string    `bson:"status" json:"status"` // pending, completed, failed
-	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
-	FlaggedQN []string  `bson:"flagged_qn" json:"flagged_qn"`
+	DriveID           string    `bson:"driveId" json:"driveId"`
+	Risk              string    `bson:"risk" json:"risk"`     // safe, moderate, high, critical
+	Status            string    `bson:"status" json:"status"` // pending, completed, failed
+	CreatedAt         time.Time `bson:"createdAt" json:"createdAt"`
+	FlaggedQuestions  []string  `bson:"flagged_qns" json:"flagged_qns"`
+	FlaggedCandidates int       `bson:"flagged_candidates" json:"flagged_candidates"`
+	TotalAnalyzed     int       `bson:"total_analyzed" json:"total_analyzed"`
 }
 
 // ComputeRequest represents a request to compute plagiarism
@@ -51,8 +67,8 @@ type ComputeRequest struct {
 
 // ComputeResponse represents the response from compute endpoint
 type ComputeResponse struct {
-	Message string `json:"message"`
-	TestID  string `json:"test_id"`
+	Step   Step   `json:"step"`
+	TestID string `json:"testId"`
 }
 
 // ErrorResponse represents a standard error response

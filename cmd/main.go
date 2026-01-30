@@ -94,7 +94,7 @@ func main() {
 	workerPool := plagiarism.NewWorkerPool(ctx)
 	defer workerPool.Close()
 
-	router := api.SetupRoutes(cfg, artifactsRepo, resultsRepo, workerPool)
+	router := api.SetupRoutes(cfg, artifactsRepo, resultsRepo, workerPool, redisClient)
 
 	// Start Redis consumer in background
 	consumerCtx, consumerCancel := context.WithCancel(ctx)

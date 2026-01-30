@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/RishiKendai/aegis/internal/config"
+	"github.com/RishiKendai/aegis/internal/infra/redis"
 	"github.com/RishiKendai/aegis/internal/models"
 	"github.com/RishiKendai/aegis/internal/plagiarism"
 	"github.com/RishiKendai/aegis/internal/repository"
@@ -20,6 +21,7 @@ type Handler struct {
 	artifactsRepo  *repository.ArtifactsRepository
 	resultsRepo    *repository.ResultsRepository
 	workerPool     *plagiarism.WorkerPool
+	redisClient    *redis.Client
 	computeSem     chan struct{} // Semaphore for bounded concurrency
 	computeTimeout time.Duration
 }
@@ -30,6 +32,7 @@ func NewHandler(
 	artifactsRepo *repository.ArtifactsRepository,
 	resultsRepo *repository.ResultsRepository,
 	workerPool *plagiarism.WorkerPool,
+	redisClient *redis.Client,
 ) *Handler {
 	// Create semaphore for bounded concurrency
 	sem := make(chan struct{}, cfg.MaxConcurrentCompute)
@@ -39,6 +42,7 @@ func NewHandler(
 		artifactsRepo:  artifactsRepo,
 		resultsRepo:    resultsRepo,
 		workerPool:     workerPool,
+		redisClient:    redisClient,
 		computeSem:     sem,
 		computeTimeout: cfg.ComputationTimeout,
 	}
@@ -101,11 +105,10 @@ func (h *Handler) Compute(c *gin.Context) {
 	}
 
 	if latestReport != nil && latestReport.Status == "completed" {
-		c.JSON(http.StatusConflict, ErrorResponse{
-			Error: "Computation already completed for this driveId",
-			Code:  "COMPUTATION_COMPLETED",
-		})
-		return
+		// Update status: Completed
+		if err := plagiarism.UpdateStatus(ctx, h.redisClient, req.DriveID, models.StepCompleted); err != nil {
+			log.Warn().Err(err).Str("driveId", req.DriveID).Msg("Failed to update completed status")
+		}
 	}
 
 	// Acquire semaphore (bounded concurrency)
@@ -120,10 +123,15 @@ func (h *Handler) Compute(c *gin.Context) {
 		return
 	}
 
+	// Update status: Initiated
+	if err := plagiarism.UpdateStatus(ctx, h.redisClient, req.DriveID, models.StepInitiated); err != nil {
+		log.Warn().Err(err).Str("driveId", req.DriveID).Msg("Failed to update initiated status")
+	}
+
 	// Return 202 Accepted immediately
 	c.JSON(http.StatusAccepted, models.ComputeResponse{
-		Message: "Plagiarism computation started",
-		TestID:  req.DriveID,
+		Step:   models.StepInitiated,
+		TestID: req.DriveID,
 	})
 
 	// Process asynchronously
@@ -140,10 +148,12 @@ func (h *Handler) processComputation(driveID string) {
 
 	// Create pending report
 	pendingReport := &models.TestReport{
-		DriveID:   driveID,
-		Risk:      "",
-		Status:    "pending",
-		FlaggedQN: []string{},
+		DriveID:           driveID,
+		Risk:              "",
+		Status:            "pending",
+		FlaggedQuestions:  []string{},
+		FlaggedCandidates: 0,
+		TotalAnalyzed:     0,
 	}
 
 	if err := h.resultsRepo.InsertTestReport(ctx, pendingReport); err != nil {
@@ -157,6 +167,7 @@ func (h *Handler) processComputation(driveID string) {
 		h.artifactsRepo,
 		h.resultsRepo,
 		h.workerPool,
+		h.redisClient,
 		h.cfg.BatchSize,
 	)
 
@@ -171,10 +182,12 @@ func (h *Handler) processComputation(driveID string) {
 
 func (h *Handler) createFailedReport(ctx context.Context, driveID, errorMsg string) {
 	err := h.resultsRepo.UpdateTestReportByDriveID(ctx, driveID, &models.TestReport{
-		DriveID:   driveID,
-		Risk:      "",
-		Status:    "failed",
-		FlaggedQN: []string{},
+		DriveID:           driveID,
+		Risk:              "",
+		Status:            "failed",
+		FlaggedQuestions:  []string{},
+		FlaggedCandidates: 0,
+		TotalAnalyzed:     0,
 	})
 	if err != nil {
 		log.Error().Err(err).Str("driveId", driveID).Msg("Failed to update failed report")

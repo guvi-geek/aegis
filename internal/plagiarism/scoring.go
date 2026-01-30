@@ -9,14 +9,21 @@ import (
 )
 
 const (
-	// SignificantSimilarityThreshold is the minimum FinalScore required for a pair
-	// to be considered significant (code similarity). Pairs below this threshold
-	// are filtered out as noise or coincidental similarity.
 	SignificantSimilarityThreshold = 0.55
 
-	// AlgorithmicSimilarityThreshold is the minimum FinalScore required for a pair
-	// to be considered algorithmic similarity (near-copy level).
 	AlgorithmicSimilarityThreshold = 0.70
+
+	// Risk level constants for candidate results (standardized format)
+	RiskClean            = "clean"
+	RiskSuspicious       = "suspicious"
+	RiskHighlySuspicious = "highly_suspicious"
+	RiskNearCopy         = "near_copy"
+
+	// Risk level constants for test reports (standardized format)
+	TestRiskSafe     = "safe"
+	TestRiskModerate = "moderate"
+	TestRiskHigh     = "high"
+	TestRiskCritical = "critical"
 )
 
 // PairSimilarity represents similarity between a pair of artifacts
@@ -92,13 +99,13 @@ func CandidateScore(pairs []PairSimilarity) float64 {
 // GetRiskLevel returns risk level based on candidate score
 func GetRiskLevel(score float64) string {
 	if score < 0.3 {
-		return "clean"
+		return RiskClean
 	} else if score < 0.6 {
-		return "suspicious"
+		return RiskSuspicious
 	} else if score < 0.85 {
-		return "highly suspicious"
+		return RiskHighlySuspicious
 	}
-	return "Near copy"
+	return RiskNearCopy
 }
 
 // TestRisk calculates test risk using the formula
@@ -121,13 +128,13 @@ func TestRisk(totalQuestions int, avgDifficulty float64, avgSimilarity float64, 
 	// Determine risk level
 	var riskLevel string
 	if risk < 0.40 {
-		riskLevel = "Safe"
+		riskLevel = TestRiskSafe
 	} else if risk < 0.60 {
-		riskLevel = "Moderate"
+		riskLevel = TestRiskModerate
 	} else if risk < 0.80 {
-		riskLevel = "High"
+		riskLevel = TestRiskHigh
 	} else {
-		riskLevel = "Critical"
+		riskLevel = TestRiskCritical
 	}
 
 	return risk, riskLevel

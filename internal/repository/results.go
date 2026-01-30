@@ -53,9 +53,11 @@ func (r *ResultsRepository) UpdateTestReportByDriveID(ctx context.Context, drive
 	filter := bson.M{"driveId": driveID}
 	update := bson.M{
 		"$set": bson.M{
-			"risk":       report.Risk,
-			"status":     report.Status,
-			"flagged_qn": report.FlaggedQN,
+			"risk":               report.Risk,
+			"status":             report.Status,
+			"flagged_qns":        report.FlaggedQuestions,
+			"flagged_candidates": report.FlaggedCandidates,
+			"total_analyzed":     report.TotalAnalyzed,
 		},
 	}
 
@@ -65,9 +67,7 @@ func (r *ResultsRepository) UpdateTestReportByDriveID(ctx context.Context, drive
 		return fmt.Errorf("failed to update test report: %w", err)
 	}
 
-	// If this was an insert (upsert), set CreatedAt
 	if result.UpsertedCount > 0 {
-		// Update the CreatedAt field for the newly inserted document
 		updateCreatedAt := bson.M{
 			"$set": bson.M{
 				"createdAt": time.Now(),
@@ -128,11 +128,10 @@ func (r *ResultsRepository) UpdateCandidateResult(ctx context.Context, result *m
 			"code_similarity":   result.CodeSimilarity,
 			"algo_similarity":   result.AlgoSimilarity,
 			"plagiarism_status": result.PlagiarismStatus,
-			"flagged_qn":        result.FlaggedQN,
+			"flagged_qns":       result.FlaggedQuestions,
 			"plagiarism_peers":  result.PlagiarismPeers,
 		},
 	}
-
 	updateResult, err := r.mongoRepo.UpdateOne(ctx, resultsCollection, filter, updateOps)
 	if err != nil {
 		log.Trace().

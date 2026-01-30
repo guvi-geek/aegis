@@ -25,9 +25,7 @@ type Config struct {
 	AstraBaseURL string
 	AstraAPIKey  string
 
-	// JWT
-	JWTSecret string
-	JWTIssuer string
+	AdminAPIKey string
 
 	// Rate Limiting
 	RateLimitRPS float64
@@ -73,9 +71,8 @@ func Load() (*Config, error) {
 	cfg.AstraBaseURL = env.GetEnv("ASTRA_BASE_URL", "")
 	cfg.AstraAPIKey = env.GetEnv("ASTRA_API_KEY", "")
 
-	// JWT
-	cfg.JWTSecret = env.GetEnv("JWT_SECRET", "")
-	cfg.JWTIssuer = env.GetEnv("JWT_ISSUER", "aegis")
+	// Admin API Key
+	cfg.AdminAPIKey = env.GetEnv("ADMIN_API_KEY", "")
 
 	// Rate Limiting
 	cfg.RateLimitRPS = env.GetEnvFloat("RATE_LIMIT_RPS", 10.0)
@@ -119,8 +116,8 @@ func (c *Config) Validate() error {
 	if c.AstraAPIKey == "" {
 		return fmt.Errorf("ASTRA_API_KEY is required")
 	}
-	if c.JWTSecret == "" {
-		return fmt.Errorf("JWT_SECRET is required")
+	if c.AdminAPIKey == "" {
+		return fmt.Errorf("ADMIN_API_KEY is required")
 	}
 	if c.MaxConcurrentCompute <= 0 {
 		return fmt.Errorf("MAX_CONCURRENT_COMPUTE must be greater than 0")

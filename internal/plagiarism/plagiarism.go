@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/RishiKendai/aegis/internal/infra/redis"
 	"github.com/RishiKendai/aegis/internal/models"
 	"github.com/RishiKendai/aegis/internal/repository"
 	"github.com/rs/zerolog/log"
@@ -53,8 +54,14 @@ func ComputePlagiarism(
 	artifactsRepo *repository.ArtifactsRepository,
 	resultsRepo *repository.ResultsRepository,
 	workerPool *WorkerPool,
+	redisClient *redis.Client,
 	batchSize int,
 ) error {
+	// Update status: Started
+	if err := UpdateStatus(ctx, redisClient, driveID, models.StepStarted); err != nil {
+		log.Warn().Err(err).Str("driveId", driveID).Msg("Failed to update started status")
+	}
+
 	// Load all artifacts for driveId
 	artifacts, err := artifactsRepo.GetArtifactsByDriveID(ctx, driveID)
 	if err != nil {
@@ -67,24 +74,34 @@ func ComputePlagiarism(
 		return fmt.Errorf("no artifacts found for driveId: %s", driveID)
 	}
 
+	// Update status: Preprocessing
+	if err := UpdateStatus(ctx, redisClient, driveID, models.StepPreprocessing); err != nil {
+		log.Warn().Err(err).Str("driveId", driveID).Msg("Failed to update preprocessing status")
+	}
+
 	// Edge Case: Single candidate
 	uniqueCandidates := make(map[string]bool)
 	for _, artifact := range artifacts {
 		uniqueCandidates[artifact.Email] = true
 	}
 	if len(uniqueCandidates) == 1 {
-		return handleSingleCandidate(ctx, artifacts[0], resultsRepo, driveID)
+		return handleSingleCandidate(ctx, artifacts[0], resultsRepo, redisClient, driveID)
 	}
 
 	// Group by qId, then by language
 	buckets := groupByQuestionAndLanguage(artifacts)
 
+	// Update status: Filtering
+	if err := UpdateStatus(ctx, redisClient, driveID, models.StepFiltering); err != nil {
+		log.Warn().Err(err).Str("driveId", driveID).Msg("Failed to update filtering status")
+	}
+
 	// Process each bucket
 	allPairSimilarities := make([]PairSimilarity, 0)
 	candidatePairsMap := make(map[string][]PairSimilarity) // email -> []PairSimilarity
+	deepAnalysisStatusUpdated := false
 
 	for qID, langBuckets := range buckets {
-		log.Trace().Str("😁 qId", qID).Msg("langBuckets")
 		for language, bucketArtifacts := range langBuckets {
 			if len(bucketArtifacts) < 2 {
 				// Edge Case: No pairs possible in this bucket
@@ -94,36 +111,12 @@ func ComputePlagiarism(
 			// Build GII (optimization: skip hashes with only 1 candidate)
 			gii := BuildGII(bucketArtifacts)
 
-			for hash, attemptIDs := range gii {
-				log.Trace().
-					Str("🐞🐞 qId", qID).
-					Str("🐞🐞 language", language).
-					Str("hash", hash).
-					Str("🐞🐞 attemptIDs", fmt.Sprintf("%v", attemptIDs)).
-					Msg("gii hash")
-			}
-			log.Trace().Msg("🐞----------------------------------------")
 			// Edge Case: No worthy pairs
 			if len(gii) == 0 {
-				log.Info().
-					Str("qId", qID).
-					Str("language", language).
-					Msg("No worthy pairs found (GII empty)")
 				continue
 			}
 
 			difficulty := bucketArtifacts[0].Difficulty
-
-			log.Trace().Msg("🐞----------------------------------------")
-			for _, artifact := range bucketArtifacts {
-				log.Trace().
-					Str("qId", qID).
-					Str("language", language).
-					Str("email", artifact.Email).
-					Str("attemptID", artifact.AttemptID).
-					Msg("artifact")
-			}
-			log.Trace().Msg("🐞----------------------------------------")
 
 			// Find worthy pairs
 			worthyPairs := GetWorthyPairs(gii, bucketArtifacts, difficulty)
@@ -136,20 +129,12 @@ func ComputePlagiarism(
 				continue
 			}
 
-			// Process pairs in batches
-			log.Trace().Msg("+++++++++++++++++++++++++++++++++++++++++++")
-			log.Trace().
-				Str("qId", qID).
-				Str("language", language).
-				Msg("Processing pairs in batches")
-
-			for _, pair := range worthyPairs {
-				log.Trace().
-					Str("email", pair.ArtifactA.Email).
-					Str("plagiarist", pair.ArtifactB.Email).
-					Msg("worthy pair")
+			if !deepAnalysisStatusUpdated {
+				if err := UpdateStatus(ctx, redisClient, driveID, models.StepDeepAnalysis); err != nil {
+					log.Warn().Err(err).Str("driveId", driveID).Msg("Failed to update deep analysis status")
+				}
+				deepAnalysisStatusUpdated = true
 			}
-			log.Trace().Msg("+++++++++++++++++++++++++++++++++++++++++++")
 
 			pairSimilarities := processPairsInBatches(
 				ctx,
@@ -163,12 +148,6 @@ func ComputePlagiarism(
 			// Filter pairs with FinalScore >= SignificantSimilarityThreshold (significant pairs)
 			significantPairs := make([]PairSimilarity, 0)
 			for _, ps := range pairSimilarities {
-				log.Trace().Msg("-------------------------------------------")
-				log.Trace().
-					Str("email", ps.ArtifactA.Email).
-					Str("plagiarist", ps.ArtifactB.Email).
-					Float64("finalScore", ps.FinalScore).
-					Msg("pair similarity")
 				if ps.FinalScore >= SignificantSimilarityThreshold {
 					significantPairs = append(significantPairs, ps)
 					// Track pairs for each candidate
@@ -183,11 +162,11 @@ func ComputePlagiarism(
 
 	// Edge Case: Short-circuit stops (no pairs with FinalScore >= SignificantSimilarityThreshold)
 	if len(allPairSimilarities) == 0 {
-		return handleNoSignificantPairs(ctx, artifacts, resultsRepo, driveID)
+		return handleNoSignificantPairs(ctx, artifacts, resultsRepo, redisClient, driveID)
 	}
 
 	// Aggregate results
-	return aggregateResults(ctx, artifacts, allPairSimilarities, candidatePairsMap, resultsRepo, driveID)
+	return aggregateResults(ctx, artifacts, allPairSimilarities, candidatePairsMap, resultsRepo, redisClient, driveID)
 }
 
 // processPairsInBatches processes pairs in batches
@@ -254,34 +233,11 @@ func groupByQuestionAndLanguage(artifacts []*models.Artifact) map[string]map[str
 	for _, artifact := range artifacts {
 		qID := artifact.QID
 		language := artifact.Language
-		log.Trace().
-			Str("qID", strconv.FormatInt(qID, 10)).
-			Str("email", artifact.Email).
-			Str("language", language).
-			Msg("grouping artifacts")
 		if buckets[strconv.FormatInt(qID, 10)] == nil {
 			buckets[strconv.FormatInt(qID, 10)] = make(map[string][]*models.Artifact)
 		}
 		buckets[strconv.FormatInt(qID, 10)][language] = append(buckets[strconv.FormatInt(qID, 10)][language], artifact)
 	}
-
-	log.Trace().Msg("----------------------------------------")
-	for qID, langBuckets := range buckets {
-		for language, bucketArtifacts := range langBuckets {
-			log.Trace().
-				Str("qID", qID).
-				Str("language", language).
-				Msg("lang buckets")
-			for _, artifact := range bucketArtifacts {
-				log.Trace().
-					Str("email", artifact.Email).
-					Str("attemptID", artifact.AttemptID).
-					Msg("artifact")
-				log.Trace().Msg(">>>>>>>>>>>>>>>>>>.")
-			}
-		}
-	}
-	log.Trace().Msg("----------------------------------------")
 
 	return buckets
 }
@@ -291,14 +247,15 @@ func handleSingleCandidate(
 	ctx context.Context,
 	artifact *models.Artifact,
 	resultsRepo *repository.ResultsRepository,
+	redisClient *redis.Client,
 	driveID string,
 ) error {
 	candidateResult := &models.CandidateResult{
 		Email:            artifact.Email,
 		AttemptID:        artifact.AttemptID,
 		DriveID:          driveID,
-		Risk:             "clean",
-		FlaggedQN:        []string{},
+		Risk:             RiskClean,
+		FlaggedQuestions: []string{},
 		PlagiarismPeers:  make(map[string][]string),
 		CodeSimilarity:   0,
 		AlgoSimilarity:   0,
@@ -310,14 +267,21 @@ func handleSingleCandidate(
 	}
 
 	testReport := &models.TestReport{
-		DriveID:   driveID,
-		Risk:      "Safe",
-		Status:    "completed",
-		FlaggedQN: []string{},
+		DriveID:           driveID,
+		Risk:              TestRiskSafe,
+		Status:            "completed",
+		FlaggedQuestions:  []string{},
+		FlaggedCandidates: 0,
+		TotalAnalyzed:     1,
 	}
 
 	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
 		return fmt.Errorf("failed to update test report: %w", err)
+	}
+
+	// Update status: Completed
+	if err := UpdateStatus(ctx, redisClient, driveID, models.StepCompleted); err != nil {
+		log.Warn().Err(err).Str("driveId", driveID).Msg("Failed to update completed status")
 	}
 
 	log.Debug().
@@ -332,9 +296,10 @@ func handleNoSignificantPairs(
 	ctx context.Context,
 	artifacts []*models.Artifact,
 	resultsRepo *repository.ResultsRepository,
+	redisClient *redis.Client,
 	driveID string,
 ) error {
-	// Create "clean" results for all candidates
+	// Create "safe" results for all candidates
 	uniqueCandidates := make(map[string]*models.Artifact)
 	for _, artifact := range artifacts {
 		if _, exists := uniqueCandidates[artifact.Email]; !exists {
@@ -347,8 +312,8 @@ func handleNoSignificantPairs(
 			Email:            artifact.Email,
 			AttemptID:        artifact.AttemptID,
 			DriveID:          driveID,
-			Risk:             "clean",
-			FlaggedQN:        []string{},
+			Risk:             RiskClean,
+			FlaggedQuestions: []string{},
 			PlagiarismPeers:  make(map[string][]string),
 			CodeSimilarity:   0,
 			AlgoSimilarity:   0,
@@ -360,15 +325,23 @@ func handleNoSignificantPairs(
 		}
 	}
 
+	totalAnalyzed := len(uniqueCandidates)
 	testReport := &models.TestReport{
-		DriveID:   driveID,
-		Risk:      "Safe",
-		Status:    "completed",
-		FlaggedQN: []string{},
+		DriveID:           driveID,
+		Risk:              TestRiskSafe,
+		Status:            "completed",
+		FlaggedQuestions:  []string{},
+		FlaggedCandidates: 0,
+		TotalAnalyzed:     totalAnalyzed,
 	}
 
 	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
 		return fmt.Errorf("failed to update test report: %w", err)
+	}
+
+	// Update status: Completed
+	if err := UpdateStatus(ctx, redisClient, driveID, models.StepCompleted); err != nil {
+		log.Warn().Err(err).Str("driveId", driveID).Msg("Failed to update completed status")
 	}
 
 	log.Info().
@@ -385,6 +358,7 @@ func aggregateResults(
 	allPairSimilarities []PairSimilarity,
 	candidatePairsMap map[string][]PairSimilarity,
 	resultsRepo *repository.ResultsRepository,
+	redisClient *redis.Client,
 	driveID string,
 ) error {
 	// Get unique candidates
@@ -411,8 +385,8 @@ func aggregateResults(
 				Email:            email,
 				AttemptID:        artifact.AttemptID,
 				DriveID:          driveID,
-				Risk:             "clean",
-				FlaggedQN:        []string{},
+				Risk:             RiskClean,
+				FlaggedQuestions: []string{},
 				PlagiarismPeers:  make(map[string][]string),
 				CodeSimilarity:   0,
 				AlgoSimilarity:   0,
@@ -461,7 +435,7 @@ func aggregateResults(
 			flaggedQNs[qID] = true
 		}
 
-		if risk != "clean" {
+		if risk != RiskClean {
 			flaggedCandidates++
 		}
 
@@ -470,7 +444,7 @@ func aggregateResults(
 			AttemptID:        artifact.AttemptID,
 			DriveID:          driveID,
 			Risk:             risk,
-			FlaggedQN:        flaggedQNList,
+			FlaggedQuestions: flaggedQNList,
 			PlagiarismPeers:  plagiarismPeers,
 			CodeSimilarity:   codeSimilarity,
 			AlgoSimilarity:   algoSimilarity,
@@ -518,14 +492,21 @@ func aggregateResults(
 	_, riskLevel := TestRisk(totalQuestions, avgDifficulty, avgSimilarity, len(flaggedQNList))
 
 	testReport := &models.TestReport{
-		DriveID:   driveID,
-		Risk:      riskLevel,
-		Status:    "completed",
-		FlaggedQN: flaggedQNList,
+		DriveID:           driveID,
+		Risk:              riskLevel,
+		Status:            "completed",
+		FlaggedQuestions:  flaggedQNList,
+		FlaggedCandidates: flaggedCandidates,
+		TotalAnalyzed:     len(candidateResults),
 	}
 
 	if err := resultsRepo.UpdateTestReportByDriveID(ctx, driveID, testReport); err != nil {
 		return fmt.Errorf("failed to update test report: %w", err)
+	}
+
+	// Update status: Completed
+	if err := UpdateStatus(ctx, redisClient, driveID, models.StepCompleted); err != nil {
+		log.Warn().Err(err).Str("driveId", driveID).Msg("Failed to update completed status")
 	}
 
 	log.Info().
