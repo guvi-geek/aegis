@@ -2,9 +2,9 @@ package models
 
 // PreprocessingResponse represents the response from Astra preprocessing API
 type PreprocessingResponse struct {
-	EmailID       string            `json:"emailId"`
+	EmailID       string            `json:"email"`
 	AttemptID     string            `json:"attemptId"`
-	DriveID       string            `json:"driveId"`
+	DriveID       string            `json:"testId"`
 	Language      string            `json:"language"`
 	Preprocessing PreprocessingData `json:"preprocessing"`
 }

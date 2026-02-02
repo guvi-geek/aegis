@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/RishiKendai/aegis/internal/models"
+	"github.com/rs/zerolog/log"
 )
 
 // AstraClient handles communication with Astra preprocessing API
@@ -22,20 +22,20 @@ type AstraClient struct {
 // NewAstraClient creates a new Astra API client
 func NewAstraClient(baseURL, apiKey string) *AstraClient {
 	return &AstraClient{
-		baseURL: baseURL,
-		apiKey:  apiKey,
+		baseURL:    baseURL,
+		apiKey:     apiKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			// No timeout - will wait indefinitely for response
 		},
 	}
 }
 
 // PreprocessRequest represents the request to Astra API
 type PreprocessRequest struct {
-	EmailID   string `json:"emailId"`
+	EmailID   string `json:"email"`
 	AttemptID string `json:"attemptId"`
-	DriveID   string `json:"driveId"`
-	Code      string `json:"code"`
+	DriveID   string `json:"testId"`
+	Code      string `json:"sourceCode"`
 	Language  string `json:"language"`
 }
 
@@ -46,7 +46,12 @@ func (c *AstraClient) Preprocess(ctx context.Context, req *PreprocessRequest) (*
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
-
+	log.Trace().
+		Msg("----------------------✌️--------------------------------")
+	log.Trace().
+		Msgf("reqBody: %s", string(reqBody))
+	log.Trace().
+		Msg("----------------------✌️--------------------------------")
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)

@@ -2,7 +2,7 @@ package models
 
 // Submission represents a submission from Redis stream
 type Submission struct {
-	AttemptID  string `json:"attemptId"`
+	AttemptID  string `json:"attemptID"`
 	SourceCode string `json:"sourceCode"`
 	Language   string `json:"language"`
 	LangCode   string `json:"langCode"`
