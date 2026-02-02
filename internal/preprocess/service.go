@@ -27,6 +27,7 @@ func (s *Service) ProcessSubmission(ctx context.Context, submission *models.Subm
 		EmailID:   submission.Email,
 		AttemptID: submission.AttemptID,
 		DriveID:   submission.DriveID,
+		TestID:    submission.TestID,
 		Code:      submission.SourceCode,
 		Language:  submission.Language,
 	}

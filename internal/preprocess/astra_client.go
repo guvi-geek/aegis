@@ -34,7 +34,8 @@ func NewAstraClient(baseURL, apiKey string) *AstraClient {
 type PreprocessRequest struct {
 	EmailID   string `json:"email"`
 	AttemptID string `json:"attemptId"`
-	DriveID   string `json:"testId"`
+	DriveID   string `json:"driveId"`
+	TestID    string `json:"testId"`
 	Code      string `json:"sourceCode"`
 	Language  string `json:"language"`
 }

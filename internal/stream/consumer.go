@@ -102,6 +102,30 @@ func (c *Consumer) createConsumerGroup(ctx context.Context) error {
 	return nil
 }
 
+func (c *Consumer) isStreamMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	log.Debug().Str("errStr", errStr)
+	return strings.Contains(errStr, "no such key") ||
+		strings.Contains(errStr, "key not found") ||
+		strings.Contains(errStr, "stream not found")
+}
+
+func (c *Consumer) ensureStreamExists(ctx context.Context) error {
+	log.Warn().
+		Str("stream", c.streamKey).
+		Msg("Stream appears to be missing, attempting to recreate")
+
+	// Try to delete the consumer group first if it exists (to avoid BUSYGROUP error)
+	// Ignore errors since the group may not exist if the stream is gone
+	_ = c.client.XGroupDestroy(ctx, c.streamKey, c.consumerGroup)
+
+	// Recreate the consumer group, which will also recreate the stream
+	return c.createConsumerGroup(ctx)
+}
+
 // recovers pending messages from the Pending Entry List
 func (c *Consumer) recoverPEL(ctx context.Context) error {
 	// Read pending messages for this consumer group
@@ -116,6 +140,15 @@ func (c *Consumer) recoverPEL(ctx context.Context) error {
 	if err != nil {
 		if err == redis.Nil {
 			return nil // No pending messages
+		}
+		if c.isStreamMissing(err) {
+			if recreateErr := c.ensureStreamExists(ctx); recreateErr != nil {
+				return fmt.Errorf("failed to recreate stream during PEL recovery: %w", recreateErr)
+			}
+			log.Info().
+				Str("stream", c.streamKey).
+				Msg("Stream recreated during PEL recovery")
+			return nil
 		}
 		return fmt.Errorf("failed to get pending messages: %w", err)
 	}
@@ -198,6 +231,15 @@ func (c *Consumer) consume(ctx context.Context) error {
 		return nil // No messages available
 	}
 	if err != nil {
+		if c.isStreamMissing(err) {
+			if recreateErr := c.ensureStreamExists(ctx); recreateErr != nil {
+				return fmt.Errorf("failed to recreate stream: %w", recreateErr)
+			}
+			log.Info().
+				Str("stream", c.streamKey).
+				Msg("Stream recreated successfully, will retry reading on next iteration")
+			return nil
+		}
 		return fmt.Errorf("failed to read from stream: %w", err)
 	}
 
@@ -258,6 +300,9 @@ func (c *Consumer) processMessage(ctx context.Context, msg *redis.XMessage) erro
 
 	if err != nil {
 		// Already sent to death queue by retry handler
+		if ackErr := c.acknowledge(ctx, msg.ID); ackErr != nil {
+			log.Error().Err(ackErr).Str("message_id", msg.ID).Msg("Failed to acknowledge message after death queue")
+		}
 		return err
 	}
 
@@ -274,6 +319,12 @@ func (c *Consumer) cleanupOldMessages(ctx context.Context) error {
 	// Use XTrimMinID to remove old messages
 	trimmed, err := c.client.XTrimMinID(ctx, c.streamKey, minID).Result()
 	if err != nil {
+		if c.isStreamMissing(err) {
+			log.Debug().
+				Str("stream", c.streamKey).
+				Msg("Stream missing during cleanup, skipping")
+			return nil
+		}
 		return fmt.Errorf("failed to trim stream: %w", err)
 	}
 

@@ -61,22 +61,9 @@ func (r *ResultsRepository) UpdateTestReportByDriveID(ctx context.Context, drive
 		},
 	}
 
-	opts := options.Update().SetUpsert(true)
-	result, err := r.mongoRepo.UpdateOne(ctx, reportsCollection, filter, update, opts)
+	_, err := r.mongoRepo.UpdateOne(ctx, reportsCollection, filter, update)
 	if err != nil {
 		return fmt.Errorf("failed to update test report: %w", err)
-	}
-
-	if result.UpsertedCount > 0 {
-		updateCreatedAt := bson.M{
-			"$set": bson.M{
-				"createdAt": time.Now(),
-			},
-		}
-		_, err = r.mongoRepo.UpdateOne(ctx, reportsCollection, filter, updateCreatedAt)
-		if err != nil {
-			return fmt.Errorf("failed to set createdAt for test report: %w", err)
-		}
 	}
 
 	return nil
