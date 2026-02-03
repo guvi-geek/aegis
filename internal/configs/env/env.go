@@ -11,8 +11,8 @@ import (
 func LoadEnv() error {
 	err := godotenv.Load()
 	if err != nil {
-		log.Println("No .env file found, using system environment variables")
-		return err
+		log.Println("No .env file found or failed to load, using system environment variables")
+		return nil // Don't return error - system env vars will be used via os.Getenv()
 	}
 
 	return nil

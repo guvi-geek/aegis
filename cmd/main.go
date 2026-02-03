@@ -24,7 +24,7 @@ import (
 
 func main() {
 	if err := env.LoadEnv(); err != nil {
-		panic(fmt.Sprintf("Failed to load .env file: %v", err))
+		log.Warn().Err(err).Msg("Failed to load .env file, continuing with system environment variables")
 	}
 
 	cfg, err := config.Load()
