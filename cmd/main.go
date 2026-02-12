@@ -138,8 +138,8 @@ func main() {
 	log.Info().Msg("Shutting down gracefully...")
 
 	// Cancel contexts
-	cancel()
-	consumerCancel()
+	// cancel()
+	// consumerCancel()
 
 	// Shutdown Gin server gracefully
 	if err := api.ShutdownServer(srv, 30*time.Second); err != nil {

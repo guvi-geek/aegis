@@ -13,11 +13,12 @@ type Job interface {
 }
 
 type WorkerPool struct {
-	workers  int
-	jobQueue chan Job
-	wg       sync.WaitGroup
-	ctx      context.Context
-	cancel   context.CancelFunc
+	workers   int
+	jobQueue  chan Job
+	wg        sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closeOnce sync.Once
 }
 
 // creates a new worker pool with CPU-based sizing
@@ -84,9 +85,11 @@ func (p *WorkerPool) Submit(job Job) error {
 
 // closes the worker pool and waits for all workers to finish
 func (p *WorkerPool) Close() {
-	close(p.jobQueue)
-	p.cancel()
-	p.wg.Wait()
+	p.closeOnce.Do(func() {
+		close(p.jobQueue)
+		p.cancel()
+		p.wg.Wait()
+	})
 }
 
 // returns the number of workers
